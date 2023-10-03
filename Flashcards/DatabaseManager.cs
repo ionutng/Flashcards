@@ -6,6 +6,7 @@ using System.Data.SqlClient;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace Flashcards
 {
@@ -67,6 +68,7 @@ namespace Flashcards
                     break;
                 case "v":
                     GetStacks();
+                    GetStack();
                     break;
                 case "d":
                     DeleteStack();
@@ -124,21 +126,32 @@ namespace Flashcards
 
                 SqlCommand command = new(query, connection);
 
-                var tableData = new DataTable();
-                tableData.Load(command.ExecuteReader());
+                var tableData = new List<List<object>>();
+
+                SqlDataReader reader = command.ExecuteReader();
+
+                if (reader.HasRows)
+                {
+                    while (reader.Read())
+                    {
+                        tableData.Add(new List<object> { reader.GetString(1) });
+                    }
+                }
 
                 connection.Close();
 
-                if (tableData.Rows.Count > 0)
+                if (tableData.Count > 0)
                 {
                     ConsoleTableBuilder
                         .From(tableData)
                         .WithTitle("Stacks", ConsoleColor.DarkBlue, ConsoleColor.DarkGray)
-                        .WithColumn("Id", "Name")
+                        .WithColumn("Name")
+                        .WithMinLength(new Dictionary<int, int> {
+                            { 0, 10 },
+                        })
                         .WithTextAlignment(new Dictionary<int, TextAligntment>
                         {
                             {0, TextAligntment.Center },
-                            {1, TextAligntment.Center },
                         })
                         .WithCharMapDefinition(new Dictionary<CharMapPositions, char> {
                             {CharMapPositions.BottomLeft, '=' },
@@ -176,27 +189,106 @@ namespace Flashcards
             }
         }
 
-        static void DeleteStack()
+        static void GetStack()
         {
-            GetStacks();
-            SqlConnection connection;
+            string stackName = Validation.GetString("Type the stack name that you want to see or Type 0 to return to the main menu.");
 
-            string stackId = Validation.GetString("Please type the id of the stack you would like to delete or Type 0 to return to the main menu.");
+            Console.Clear();
+            SqlConnection connection;
 
             try
             {
                 connection = new SqlConnection(connectionString);
                 connection.Open();
 
-                string query = $"DELETE FROM Stacks WHERE StackId = {stackId}";
+                string query = $"SELECT FlashcardId, Question, Answer FROM Stacks " +
+                    $"INNER JOIN Flashcards ON Stacks.StackId = Flashcards.StackId " +
+                    $"WHERE Name = '"+ stackName +"'";
+
+                SqlCommand command = new(query, connection);
+
+                var tableData = new List<List<object>>();
+
+                SqlDataReader reader = command.ExecuteReader();
+
+                if (reader.HasRows)
+                {
+                    while (reader.Read())
+                    {
+                        tableData.Add(new List<object> { reader.GetInt32(0), reader.GetString(1), reader.GetString(2) });
+                    }
+                }
+
+                if (tableData.Count > 0)
+                {
+                    ConsoleTableBuilder
+                        .From(tableData)
+                        .WithTitle($"{stackName}", ConsoleColor.DarkBlue, ConsoleColor.DarkGray)
+                        .WithColumn("FlashcardId", "Question", "Answer")
+                        .WithTextAlignment(new Dictionary<int, TextAligntment>
+                        {
+                            {0, TextAligntment.Center },
+                            {1, TextAligntment.Center },
+                            {2, TextAligntment.Center },
+                        })
+                        .WithCharMapDefinition(new Dictionary<CharMapPositions, char> {
+                            {CharMapPositions.BottomLeft, '=' },
+                            {CharMapPositions.BottomCenter, '=' },
+                            {CharMapPositions.BottomRight, '=' },
+                            {CharMapPositions.BorderTop, '=' },
+                            {CharMapPositions.BorderBottom, '=' },
+                            {CharMapPositions.BorderLeft, '|' },
+                            {CharMapPositions.BorderRight, '|' },
+                            {CharMapPositions.DividerY, '|' },
+                        })
+                        .WithHeaderCharMapDefinition(new Dictionary<HeaderCharMapPositions, char> {
+                            {HeaderCharMapPositions.TopLeft, '=' },
+                            {HeaderCharMapPositions.TopCenter, '=' },
+                            {HeaderCharMapPositions.TopRight, '=' },
+                            {HeaderCharMapPositions.BottomLeft, '|' },
+                            {HeaderCharMapPositions.BottomCenter, '-' },
+                            {HeaderCharMapPositions.BottomRight, '|' },
+                            {HeaderCharMapPositions.Divider, '|' },
+                            {HeaderCharMapPositions.BorderTop, '=' },
+                            {HeaderCharMapPositions.BorderBottom, '-' },
+                            {HeaderCharMapPositions.BorderLeft, '|' },
+                            {HeaderCharMapPositions.BorderRight, '|' },
+                        })
+                        .ExportAndWriteLine();
+                }
+                else
+                    Console.WriteLine("\nThere are no records yet!");
+
+                connection.Close();
+                Console.WriteLine();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+        }
+
+        static void DeleteStack()
+        {
+            GetStacks();
+            SqlConnection connection;
+
+            string stackName = Validation.GetString("Please type the name of the stack you would like to delete or Type 0 to return to the main menu.");
+
+            try
+            {
+                connection = new SqlConnection(connectionString);
+                connection.Open();
+
+                string query = $"DELETE FROM Stacks WHERE Name = '" + stackName + "'";
 
                 SqlCommand command = new(query, connection);
 
                 Console.Clear();
                 if (command.ExecuteNonQuery() > 0)
-                    Console.WriteLine($"Stack #{stackId} successfully deleted!\n");
+                    Console.WriteLine($"{stackName} stack successfully deleted!\n");
                 else
-                    Console.WriteLine($"A stack with id: {stackId} doesn't exist!\n");
+                    Console.WriteLine($"{stackName} stack doesn't exist!\n");
 
                 connection.Close();
                 
@@ -212,7 +304,7 @@ namespace Flashcards
             GetStacks();
             SqlConnection connection;
 
-            string stackId = Validation.GetString("Please type the id of the stack you would like to update or Type 0 to return to the main menu.");
+            string oldStackName = Validation.GetString("Please type the name of the stack you would like to update or Type 0 to return to the main menu.");
 
             string stackName = Validation.GetString("Please type the new name of the stack or Type 0 to return to the main menu.");
 
@@ -221,15 +313,15 @@ namespace Flashcards
                 connection = new SqlConnection(connectionString);
                 connection.Open();
 
-                string query = $"UPDATE Stacks SET Name = ('" + stackName + "') WHERE StackId = '" + stackId + "'";
+                string query = $"UPDATE Stacks SET Name = ('" + stackName + "') WHERE Name = '" + oldStackName + "'";
 
                 SqlCommand command = new(query, connection);
 
                 Console.Clear();
                 if (command.ExecuteNonQuery() > 0)
-                    Console.WriteLine($"Stack #{stackId} successfully updated!\n");
+                    Console.WriteLine($"{stackName} stack successfully updated!\n");
                 else
-                    Console.WriteLine($"A stack with id: {stackId} doesn't exist!\n");
+                    Console.WriteLine($"{oldStackName} stack doesn't exist!\n");
 
                 connection.Close();
 
@@ -288,7 +380,9 @@ namespace Flashcards
 
                 Console.WriteLine();
                 GetStacks();
-                string stackId = Validation.GetString("Please insert the id of the stack the flashcard should be in or Type 0 to return to the main menu.");
+                string stackName = Validation.GetString("Please insert the name of the stack the flashcard should be in or Type 0 to return to the main menu.");
+
+                int stackId = GetStackId(stackName);
 
                 string query = $"INSERT INTO Flashcards (Question, Answer, StackId) VALUES ('" + flashcardQuestion + "', '" + flashcardAnswer + "', '" + stackId + "')";
 
@@ -381,7 +475,7 @@ namespace Flashcards
             GetFlashcards();
             SqlConnection connection;
 
-            string flashcardId = Validation.GetString("Please type the id of the flashcaard you would like to delete or Type 0 to return to the main menu.");
+            string flashcardId = Validation.GetString("Please type the id of the flashcard you would like to delete or Type 0 to return to the main menu.");
 
             try
             {
@@ -490,7 +584,9 @@ namespace Flashcards
 
                 Console.WriteLine();
                 GetStacks();
-                string stackId = Validation.GetString("Please type the new stack id or Type 0 to return to the main menu.");
+                string stackName = Validation.GetString("Please type the new stack name or Type 0 to return to the main menu.");
+
+                int stackId = GetStackId(stackName);
 
                 try
                 {
@@ -526,7 +622,9 @@ namespace Flashcards
                 string flashcardAnswer = Validation.GetString("Please type the new correct answer or Type 0 to return to the main menu.");
 
                 GetStacks();
-                string stackId = Validation.GetString("Please type the new stack id or Type 0 to return to the main menu.");
+                string stackName = Validation.GetString("Please type the new stack name or Type 0 to return to the main menu.");
+
+                int stackId = GetStackId(stackName);
 
                 try
                 {
@@ -591,6 +689,39 @@ namespace Flashcards
             {
                 Console.WriteLine(ex.Message);
             }
+        }
+
+        static int GetStackId(string stackName)
+        {
+            SqlConnection connection;
+            int stackId = 0;
+
+            try
+            {
+                connection = new SqlConnection(connectionString);
+                connection.Open();
+
+                string query = $"SELECT StackId FROM Stacks WHERE Name = ('" + stackName + "')";
+
+                SqlCommand command = new(query, connection);
+
+                SqlDataReader reader = command.ExecuteReader();
+
+                if (reader.HasRows)
+                {
+                    while (reader.Read())
+                    {
+                        stackId = reader.GetInt32(0);
+                    }
+                }
+
+                connection.Close();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+            return stackId;
         }
     }
 }

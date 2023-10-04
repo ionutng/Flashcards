@@ -1,8 +1,10 @@
 ﻿using ConsoleTableExt;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -37,11 +39,17 @@ namespace Flashcards
                     case "2":
                         ManageFlashcards();
                         break;
+                    case "3":
+                        CreateStudySession();
+                        break;
+                    case "4":
+                        ViewStudySessions();
+                        break;
                     case "0":
                         Environment.Exit(0);
                         break;
                     default:
-                        Console.WriteLine("\nWrong input! Please type a number between 0 and 2.");
+                        Console.WriteLine("\nWrong input! Please type a number between 0 and 4.");
                         break;
                 }
             }
@@ -723,5 +731,259 @@ namespace Flashcards
             }
             return stackId;
         }
+
+        static bool CheckStackName(string name)
+        {
+            SqlConnection connection;
+
+            try
+            {
+                connection = new SqlConnection(connectionString);
+                connection.Open();
+
+                string query = $"SELECT Name FROM Stacks";
+
+                SqlCommand command = new(query, connection);
+
+                SqlDataReader reader = command.ExecuteReader();
+
+                var tableData = new List<string>();
+
+                if (reader.HasRows)
+                {
+                    while (reader.Read())
+                    {
+                        tableData.Add(reader.GetString(0));
+                    }
+                }
+
+                connection.Close();
+
+                foreach (var data in tableData)
+                    if (data.ToLower() == name.ToLower())
+                        return true;
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                return false;
+            }
+        }
+
+        static void CreateStudySession()
+        {
+            GetStacks();
+            string stackName = Validation.GetString("Type the name of the stack you want to study or Type 0 to return to the main menu.");
+            
+            if (CheckStackName(stackName))
+            {
+                SqlConnection connection;
+
+                try
+                {
+                    connection = new SqlConnection(connectionString);
+                    connection.Open();
+                    string query;
+
+                    query = $"SELECT Name, Question, Answer FROM Stacks " +
+                        $"INNER JOIN Flashcards ON Stacks.StackId = Flashcards.StackId " +
+                        $"WHERE Name = '" + stackName + "'";
+
+                    SqlCommand command = new(query, connection);
+
+                    SqlDataReader reader = command.ExecuteReader();
+
+                    var tableData = new List<Flashcards>();
+
+                    if (reader.HasRows)
+                    {
+                        while (reader.Read())
+                        {
+                            tableData.Add(new Flashcards
+                            {
+                                Name = reader.GetString(0),
+                                Question = reader.GetString(1),
+                                Answer = reader.GetString(2)
+                            });
+                        }
+                    }
+
+                    string continueSession = "";
+                    int questions = 0;
+                    int points = 0;
+                    Stopwatch stopwatch = Stopwatch.StartNew();
+
+                    do
+                    {
+                        foreach (var data in tableData)
+                        {
+                            Console.WriteLine($"Current stack: {data.Name}");
+                            Console.WriteLine("--------------------------");
+                            Console.WriteLine($"Question: {data.Question}");
+                            string answer = Validation.GetString("Your answer:");
+                            if (answer.Trim().ToLower() == data.Answer.ToLower())
+                            {
+                                Console.WriteLine("Correct! You get 1 point!");
+                                points++;
+                            }
+                            else
+                                Console.WriteLine($"Wrong! The correct answer is: {data.Answer}");
+                            questions++;
+                        
+                            continueSession = Validation.GetString("Do you wish to keep going? y for yes");
+                            if (continueSession != "y")
+                                break;
+                        }
+
+                    } while (continueSession.Trim().ToLower() == "y");
+
+                    stopwatch.Stop();
+                    TimeSpan elapsedTime = stopwatch.Elapsed;
+
+                    Console.Clear();
+                    Console.WriteLine($"You have answered correctly {points} out of {questions} questions.");
+                    Console.WriteLine($"It took you {elapsedTime.Hours} hours, {elapsedTime.Minutes} minutes and {elapsedTime.Seconds} seconds.");
+
+                    connection.Close();
+
+                    InsertStudySession(points, elapsedTime, questions, stackName);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.Message);
+                }
+            }
+            else if (stackName == "0")
+            {
+                Console.Clear();
+                GetUserInput();
+            } 
+            else
+            {
+                Console.Clear();
+                Console.WriteLine($"A stack with name: {stackName} doesn't exist!");
+                GetUserInput();
+            }
+        }
+
+        static void InsertStudySession(int points, TimeSpan elapsedTime, int questions, string stackName)
+        {
+            SqlConnection connection;
+
+            try
+            {
+                connection = new SqlConnection(connectionString);
+                connection.Open();
+
+                string query = "INSERT INTO StudySessions VALUES ('" + DateTime.Now + "', '" + points + "', '" + elapsedTime + "', '" + questions + "', '" + GetStackId(stackName) + "')";
+
+                SqlCommand command = new(query, connection);
+
+                command.ExecuteNonQuery();
+
+                Console.WriteLine($"Successfully added a study session!");
+
+                connection.Close();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+        }
+
+        static void ViewStudySessions()
+        {
+            Console.Clear();
+            SqlConnection connection;
+
+            try
+            {
+                connection = new SqlConnection(connectionString);
+                connection.Open();
+
+                string query = $"SELECT Date, Score, TotalQuestions, Time, Name FROM StudySessions " +
+                    $"INNER JOIN Stacks ON StudySessions.StackId = Stacks.StackId";
+
+                SqlCommand command = new(query, connection);
+
+                var tableData = new List<List<object>>();
+
+                SqlDataReader reader = command.ExecuteReader();
+
+                if (reader.HasRows)
+                {
+                    while (reader.Read())
+                    {
+                        tableData.Add(new List<object> { 
+                            reader.GetDateTime(0).ToString("dd-MM-yyyy"), 
+                            reader.GetInt32(1), 
+                            reader.GetInt32(2), 
+                            reader.GetTimeSpan(3).Hours + ":" + reader.GetTimeSpan(3).Minutes + ":" + reader.GetTimeSpan(3).Seconds, 
+                            reader.GetString(4) 
+                        });
+                    }
+                }
+
+                connection.Close();
+
+                if (tableData.Count > 0)
+                {
+                    ConsoleTableBuilder
+                        .From(tableData)
+                        .WithTitle("Study Sessions", ConsoleColor.DarkBlue, ConsoleColor.DarkGray)
+                        .WithColumn("Date", "Score", "Questions", "Time (H:m:s)", "Stack Name")
+                        .WithTextAlignment(new Dictionary<int, TextAligntment>
+                        {
+                            {0, TextAligntment.Center },
+                            {1, TextAligntment.Center },
+                            {2, TextAligntment.Center },
+                            {3, TextAligntment.Center },
+                            {4, TextAligntment.Center },
+                        })
+                        .WithCharMapDefinition(new Dictionary<CharMapPositions, char> {
+                            {CharMapPositions.BottomLeft, '=' },
+                            {CharMapPositions.BottomCenter, '=' },
+                            {CharMapPositions.BottomRight, '=' },
+                            {CharMapPositions.BorderTop, '=' },
+                            {CharMapPositions.BorderBottom, '=' },
+                            {CharMapPositions.BorderLeft, '|' },
+                            {CharMapPositions.BorderRight, '|' },
+                            {CharMapPositions.DividerY, '|' },
+                        })
+                        .WithHeaderCharMapDefinition(new Dictionary<HeaderCharMapPositions, char> {
+                            {HeaderCharMapPositions.TopLeft, '=' },
+                            {HeaderCharMapPositions.TopCenter, '=' },
+                            {HeaderCharMapPositions.TopRight, '=' },
+                            {HeaderCharMapPositions.BottomLeft, '|' },
+                            {HeaderCharMapPositions.BottomCenter, '-' },
+                            {HeaderCharMapPositions.BottomRight, '|' },
+                            {HeaderCharMapPositions.Divider, '|' },
+                            {HeaderCharMapPositions.BorderTop, '=' },
+                            {HeaderCharMapPositions.BorderBottom, '-' },
+                            {HeaderCharMapPositions.BorderLeft, '|' },
+                            {HeaderCharMapPositions.BorderRight, '|' },
+                        })
+                        .ExportAndWriteLine();
+                }
+                else
+                    Console.WriteLine("\nThere are no records yet!");
+
+                Console.WriteLine();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+        }
+    }
+    class Flashcards
+    {
+        internal string Name { get; set; }
+
+        internal string Question { get; set; }
+
+        internal string Answer { get; set; }
     }
 }
